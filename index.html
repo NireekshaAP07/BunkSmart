@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance Tracker</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="/_sdk/data_sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;family=Outfit:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet">
+  <style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:'Outfit',sans-serif}
+.app-shell{height:100%;width:100%;display:flex;flex-direction:column;overflow:hidden}
+.app-content{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-bottom:80px}
+.tab-bar{position:fixed;bottom:0;left:0;right:0;z-index:50}
+.card-glow{box-shadow:0 0 20px rgba(99,102,241,0.1)}
+.pill{transition:all .2s ease}
+.pill:hover{transform:scale(1.05)}
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+.pulse-dot{animation:pulse-dot 2s infinite}
+.progress-ring{transition:stroke-dashoffset .6s ease}
+input,select,textarea{font-family:'Outfit',sans-serif}
+.no-scrollbar::-webkit-scrollbar{display:none}
+.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+.toast-show{animation:toastIn .3s ease forwards}
+.toast-hide{animation:toastOut .3s ease forwards}
+@keyframes toastIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastOut{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(20px)}}
+.chart-slice{transition:all .4s ease}
+</style>
+  <script>
+tailwind.config={
+  theme:{
+    extend:{
+      colors:{
+        bg:'#0f0f1a',
+        surface:'#1a1a2e',
+        surfaceLight:'#252542',
+        accent:'#6366f1',
+        accentLight:'#818cf8',
+        danger:'#ef4444',
+        success:'#22c55e',
+        warn:'#f59e0b',
+        textPrimary:'#e2e8f0',
+        textSecondary:'#94a3b8',
+        textMuted:'#64748b'
+      }
+    }
+  }
+}
+</script>
+  <style>body { box-sizing: border-box; }</style>
+ </head>
+ <body class="h-full bg-bg text-textPrimary">
+  <div id="app" class="app-shell"><!-- Toast -->
+   <div id="toast" class="fixed top-4 left-4 right-4 z-[100] pointer-events-none hidden">
+    <div class="bg-surfaceLight border border-accent/30 rounded-xl px-4 py-3 text-sm text-center shadow-lg pointer-events-auto"><span id="toast-msg"></span>
+    </div>
+   </div><!-- Header -->
+   <header class="bg-surface/80 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between shrink-0" style="z-index:40">
+    <div>
+     <h1 id="header-title" class="text-lg font-bold" style="font-family:'JetBrains Mono',monospace">📚 Attendance Tracker</h1>
+     <p id="header-date" class="text-xs text-textSecondary mt-0.5"></p>
+    </div>
+    <div class="flex gap-2"><button id="btn-undo" onclick="undoLast()" class="w-9 h-9 rounded-lg bg-surfaceLight flex items-center justify-center hover:bg-accent/20 transition-colors" title="Undo"> <i data-lucide="undo-2" style="width:16px;height:16px;color:#94a3b8"></i> </button>
+    </div>
+   </header><!-- Tab Content -->
+   <div class="app-content no-scrollbar" id="tab-content"></div><!-- Bottom Tab Bar -->
+   <nav class="tab-bar bg-surface/95 backdrop-blur-md border-t border-white/5 px-2 py-2">
+    <div class="flex justify-around items-center max-w-md mx-auto"><button onclick="switchTab('home')" data-tab="home" class="tab-btn flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors"> <i data-lucide="home" style="width:20px;height:20px"></i> <span class="text-[10px] font-medium">Home</span> </button> <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors"> <i data-lucide="bar-chart-3" style="width:20px;height:20px"></i> <span class="text-[10px] font-medium">Dashboard</span> </button> <button onclick="switchTab('timetable')" data-tab="timetable" class="tab-btn flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors"> <i data-lucide="calendar" style="width:20px;height:20px"></i> <span class="text-[10px] font-medium">Timetable</span> </button> <button onclick="switchTab('subjects')" data-tab="subjects" class="tab-btn flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors"> <i data-lucide="book-open" style="width:20px;height:20px"></i> <span class="text-[10px] font-medium">Subjects</span> </button>
+    </div>
+   </nav>
+  </div>
+  <script>
+// ==================== DATA MODELS ====================
+let allRecords = [];
+let undoStack = [];
+let currentTab = 'home';
+const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const DAY_SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat'];
+const SUBJECT_COLORS = ['#6366f1','#ec4899','#14b8a6','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#84cc16','#f97316','#a855f7'];
+const TARGET = 75;
+
+// Helper to get records by type
+function getSubjects(){ return allRecords.filter(r=>r.type==='subject') }
+function getTimetable(){ return allRecords.filter(r=>r.type==='timetable') }
+function getAttendance(){ return allRecords.filter(r=>r.type==='attendance') }
+
+function getSubjectStats(subjectName){
+  const records = getAttendance().filter(r=>r.subject_name===subjectName);
+  let attended=0, total=0;
+  records.forEach(r=>{
+    if(r.status==='present'){attended++;total++}
+    else if(r.status==='absent'){total++}
+  });
+  return {attended,total,percentage:total>0?Math.round((attended/total)*100):100};
+}
+
+function getTodayStr(){ return new Date().toISOString().split('T')[0] }
+function getDayName(){ return DAYS[new Date().getDay()-1]||null }
+
+// ==================== TOAST ====================
+let toastTimer=null;
+function showToast(msg){
+  const t=document.getElementById('toast');
+  const m=document.getElementById('toast-msg');
+  m.textContent=msg;
+  t.classList.remove('hidden');
+  t.firstElementChild.className='bg-surfaceLight border border-accent/30 rounded-xl px-4 py-3 text-sm text-center shadow-lg pointer-events-auto toast-show';
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{
+    t.firstElementChild.classList.remove('toast-show');
+    t.firstElementChild.classList.add('toast-hide');
+    setTimeout(()=>t.classList.add('hidden'),300);
+  },2500);
+}
+
+// ==================== UNDO ====================
+async function pushUndo(action, record){
+  undoStack.push({action, record:{...record}});
+  if(undoStack.length>20) undoStack.shift();
+}
+
+async function undoLast(){
+  if(!undoStack.length) return showToast('Nothing to undo');
+  const item=undoStack.pop();
+  if(item.action==='create'){
+    const match=allRecords.find(r=>r.__backendId && r.type===item.record.type && r.subject_name===item.record.subject_name && r.date===item.record.date && r.period===item.record.period);
+    if(match) await window.dataSdk.delete(match);
+  } else if(item.action==='delete'){
+    const {__backendId,...rest}=item.record;
+    await window.dataSdk.create(rest);
+  } else if(item.action==='update'){
+    const match=allRecords.find(r=>r.__backendId===item.record.__backendId);
+    if(match) await window.dataSdk.update({...match,...item.record});
+  }
+  showToast('Undone!');
+}
+
+// ==================== SMART BUNK LOGIC ====================
+function safeBunks(attended,total){
+  if(total===0) return 99;
+  let bunks=0;
+  while(true){
+    const pct=(attended/(total+bunks+1))*100;
+    if(pct<TARGET) break;
+    bunks++;
+  }
+  return bunks;
+}
+
+function classesNeeded(attended,total){
+  if(total===0) return 0;
+  let needed=0;
+  let a=attended, t=total;
+  while((a/t)*100<TARGET && needed<200){
+    a++;t++;needed++;
+  }
+  return needed;
+}
+
+// ==================== RENDERING ====================
+function switchTab(tab){
+  currentTab=tab;
+  document.querySelectorAll('.tab-btn').forEach(b=>{
+    const isActive=b.dataset.tab===tab;
+    b.style.color=isActive?'#6366f1':'#64748b';
+  });
+  renderCurrentTab();
+}
+
+function renderCurrentTab(){
+  const c=document.getElementById('tab-content');
+  switch(currentTab){
+    case 'home': renderHome(c); break;
+    case 'dashboard': renderDashboard(c); break;
+    case 'timetable': renderTimetable(c); break;
+    case 'subjects': renderSubjects(c); break;
+  }
+  lucide.createIcons();
+}
+
+// ==================== HOME TAB ====================
+function renderHome(container){
+  const day=getDayName();
+  const today=getTodayStr();
+  const todaySlots=day?getTimetable().filter(r=>r.day===day).sort((a,b)=>a.period-b.period):[];
+  const todayAtt=getAttendance().filter(r=>r.date===today);
+  const subjects=getSubjects();
+
+  let html=`<div class="px-4 py-4 space-y-4 fade-in">`;
+
+  // Smart Alerts
+  if(day && todaySlots.length>0){
+    const unmarked=todaySlots.filter(s=>!todayAtt.find(a=>a.subject_name===s.subject_name && a.period===s.period));
+    let alerts=[];
+    const uniqueSubjectsToday=[...new Set(todaySlots.map(s=>s.subject_name))];
+    uniqueSubjectsToday.forEach(subj=>{
+      const st=getSubjectStats(subj);
+      const sb=safeBunks(st.attended,st.total);
+      const cn=classesNeeded(st.attended,st.total);
+      const occurrences=todaySlots.filter(s=>s.subject_name===subj).length;
+      if(st.percentage<TARGET) alerts.push(`📌 Attend next ${cn} ${subj} classes to reach 75%`);
+      else if(sb===0) alerts.push(`🚫 Cannot bunk ${subj} today!`);
+      else if(sb<=2) alerts.push(`⚠️ ${subj}: Only ${sb} bunk${sb>1?'s':''} left`);
+    });
+    if(alerts.length){
+      html+=`<div class="bg-warn/10 border border-warn/20 rounded-2xl p-3 space-y-1">
+        <p class="text-xs font-semibold text-warn flex items-center gap-1"><i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Smart Alerts</p>
+        ${alerts.map(a=>`<p class="text-xs text-warn/80">${a}</p>`).join('')}
+      </div>`;
+    }
+  }
+
+  // Prediction Cards
+  if(day && todaySlots.length>0){
+    html+=`<div class="space-y-2">
+      <h2 class="text-sm font-semibold text-textSecondary flex items-center gap-2"><i data-lucide="sparkles" style="width:14px;height:14px;color:#6366f1"></i> Today's Predictions</h2>`;
+    const uniqueSubjects=[...new Set(todaySlots.map(s=>s.subject_name))];
+    uniqueSubjects.forEach(subj=>{
+      const st=getSubjectStats(subj);
+      const occurrences=todaySlots.filter(s=>s.subject_name===subj).length;
+      const unmarkedCount=todaySlots.filter(s=>s.subject_name===subj && !todayAtt.find(a=>a.subject_name===s.subject_name && a.period===s.period)).length;
+      const ifPresent=st.total+unmarkedCount>0?Math.round(((st.attended+unmarkedCount)/(st.total+unmarkedCount))*100):100;
+      const ifAbsent=st.total+unmarkedCount>0?Math.round((st.attended/(st.total+unmarkedCount))*100):0;
+      const sub=subjects.find(s=>s.subject_name===subj);
+      const col=sub?sub.subject_color:'#6366f1';
+      html+=`<div class="bg-surface rounded-2xl p-3 border border-white/5 card-glow">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <div class="w-2.5 h-2.5 rounded-full" style="background:${col}"></div>
+            <span class="text-sm font-semibold">${subj}</span>
+          </div>
+          <span class="text-xs text-textMuted">${occurrences} class${occurrences>1?'es':''} today</span>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="bg-success/10 border border-success/20 rounded-xl p-2 text-center">
+            <p class="text-[10px] text-success/80 mb-0.5">If Present</p>
+            <p class="text-lg font-bold ${ifPresent>=TARGET?'text-success':'text-warn'}">${ifPresent}% ${ifPresent>=TARGET?'✅':'⚠️'}</p>
+          </div>
+          <div class="bg-danger/10 border border-danger/20 rounded-xl p-2 text-center">
+            <p class="text-[10px] text-danger/80 mb-0.5">If Absent</p>
+            <p class="text-lg font-bold ${ifAbsent>=TARGET?'text-success':'text-danger'}">${ifAbsent}% ${ifAbsent>=TARGET?'✅':'⚠️'}</p>
+          </div>
+        </div>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+
+  // Today's Schedule & Marking
+  if(!day){
+    html+=`<div class="bg-surface rounded-2xl p-6 text-center border border-white/5">
+      <p class="text-4xl mb-2">🎉</p>
+      <p class="text-lg font-semibold">It's Sunday!</p>
+      <p class="text-sm text-textSecondary mt-1">No classes today. Enjoy your day off!</p>
+    </div>`;
+  } else if(todaySlots.length===0){
+    html+=`<div class="bg-surface rounded-2xl p-6 text-center border border-white/5">
+      <p class="text-4xl mb-2">📅</p>
+      <p class="text-lg font-semibold">No classes scheduled</p>
+      <p class="text-sm text-textSecondary mt-1">Set up your ${day} timetable first.</p>
+    </div>`;
+  } else {
+    const unmarkedExist=todaySlots.some(s=>!todayAtt.find(a=>a.subject_name===s.subject_name && a.period===s.period));
+    html+=`<div class="flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-textSecondary">Today's Classes</h2>
+      ${unmarkedExist?`<button onclick="markFullDayPresent()" class="text-xs bg-success/20 text-success px-3 py-1.5 rounded-lg font-medium hover:bg-success/30 transition-colors">✅ Mark All Present</button>`:''}
+    </div>`;
+    todaySlots.forEach(slot=>{
+      const att=todayAtt.find(a=>a.subject_name===slot.subject_name && a.period===slot.period);
+      const sub=subjects.find(s=>s.subject_name===slot.subject_name);
+      const col=sub?sub.subject_color:'#6366f1';
+      const st=getSubjectStats(slot.subject_name);
+      html+=`<div class="bg-surface rounded-2xl p-3 border border-white/5 transition-all">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold" style="background:${col}">P${slot.period}</div>
+            <div>
+              <p class="text-sm font-semibold">${slot.subject_name}</p>
+              <p class="text-[10px] text-textMuted">${st.attended}/${st.total} · ${st.percentage}%</p>
+            </div>
+          </div>
+          ${att?`<span class="text-xs px-2 py-1 rounded-lg font-medium ${att.status==='present'?'bg-success/20 text-success':att.status==='absent'?'bg-danger/20 text-danger':'bg-textMuted/20 text-textMuted'}">${att.status==='present'?'Present':att.status==='absent'?'Absent':'No Class'}</span>`:''}
+        </div>
+        <div class="flex gap-2">
+          <button onclick="markAttendance('${slot.subject_name}',${slot.period},'present')" class="flex-1 text-xs py-2 rounded-xl font-medium transition-colors ${att&&att.status==='present'?'bg-success text-white':'bg-success/10 text-success hover:bg-success/20'}">Present</button>
+          <button onclick="markAttendance('${slot.subject_name}',${slot.period},'absent')" class="flex-1 text-xs py-2 rounded-xl font-medium transition-colors ${att&&att.status==='absent'?'bg-danger text-white':'bg-danger/10 text-danger hover:bg-danger/20'}">Absent</button>
+          <button onclick="markAttendance('${slot.subject_name}',${slot.period},'noclass')" class="flex-1 text-xs py-2 rounded-xl font-medium transition-colors ${att&&att.status==='noclass'?'bg-textMuted text-white':'bg-white/5 text-textMuted hover:bg-white/10'}">No Class</button>
+        </div>
+      </div>`;
+    });
+  }
+
+  html+=`</div>`;
+  container.innerHTML=html;
+}
+
+async function markAttendance(subj, period, status){
+  const today=getTodayStr();
+  const existing=getAttendance().find(r=>r.date===today && r.subject_name===subj && r.period===period);
+  if(existing){
+    pushUndo('update',{...existing});
+    await window.dataSdk.update({...existing, status});
+  } else {
+    if(allRecords.length>=999) return showToast('Storage limit reached!');
+    await window.dataSdk.create({type:'attendance',subject_name:subj,subject_color:'',day:getDayName()||'',period,date:today,status,attended:0,total:0,created_at:new Date().toISOString()});
+    pushUndo('create',{type:'attendance',subject_name:subj,date:today,period});
+  }
+  showToast(status==='present'?'Marked present ✅':status==='absent'?'Marked absent ❌':'Marked no class');
+}
+
+async function markFullDayPresent(){
+  const day=getDayName();
+  if(!day) return;
+  const today=getTodayStr();
+  const slots=getTimetable().filter(r=>r.day===day);
+  const todayAtt=getAttendance().filter(r=>r.date===today);
+  for(const slot of slots){
+    const existing=todayAtt.find(a=>a.subject_name===slot.subject_name && a.period===slot.period);
+    if(!existing){
+      if(allRecords.length>=999) return showToast('Storage limit reached!');
+      await window.dataSdk.create({type:'attendance',subject_name:slot.subject_name,subject_color:'',day,period:slot.period,date:today,status:'present',attended:0,total:0,created_at:new Date().toISOString()});
+    }
+  }
+  showToast('All classes marked present! ✅');
+}
+
+// ==================== DASHBOARD TAB ====================
+function renderDashboard(container){
+  const subjects=getSubjects();
+  const stats=subjects.map(s=>({name:s.subject_name,color:s.subject_color,...getSubjectStats(s.subject_name)})).sort((a,b)=>a.percentage-b.percentage);
+
+  let html=`<div class="px-4 py-4 space-y-4 fade-in">
+    <h2 class="text-sm font-semibold text-textSecondary flex items-center gap-2"><i data-lucide="bar-chart-3" style="width:14px;height:14px;color:#6366f1"></i> Attendance Overview</h2>`;
+
+  if(!stats.length){
+    html+=`<div class="bg-surface rounded-2xl p-6 text-center border border-white/5">
+      <p class="text-4xl mb-2">📖</p>
+      <p class="font-semibold">No subjects yet</p>
+      <p class="text-sm text-textSecondary mt-1">Add subjects to start tracking.</p>
+    </div>`;
+  }
+
+  // Overall
+  if(stats.length){
+    const totalAtt=stats.reduce((s,x)=>s+x.attended,0);
+    const totalAll=stats.reduce((s,x)=>s+x.total,0);
+    const overallPct=totalAll>0?Math.round((totalAtt/totalAll)*100):100;
+    html+=`<div class="bg-surface rounded-2xl p-4 border border-white/5 card-glow">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-sm font-semibold">Overall Attendance</p>
+        <span class="text-2xl font-bold ${overallPct>=TARGET?'text-success':'text-danger'}">${overallPct}%</span>
+      </div>
+      <div class="w-full h-2 bg-surfaceLight rounded-full overflow-hidden">
+        <div class="h-full rounded-full transition-all duration-500" style="width:${overallPct}%;background:${overallPct>=TARGET?'#22c55e':'#ef4444'}"></div>
+      </div>
+      <p class="text-[10px] text-textMuted mt-1">${totalAtt} / ${totalAll} classes attended</p>
+    </div>`;
+  }
+
+  // Per Subject
+  stats.forEach(s=>{
+    const sb=safeBunks(s.attended,s.total);
+    const cn=classesNeeded(s.attended,s.total);
+    html+=`<div class="bg-surface rounded-2xl p-4 border border-white/5">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full" style="background:${s.color}"></div>
+          <span class="text-sm font-semibold">${s.name}</span>
+        </div>
+        <span class="text-lg font-bold ${s.percentage>=TARGET?'text-success':'text-danger'}">${s.percentage}%</span>
+      </div>
+      <div class="w-full h-1.5 bg-surfaceLight rounded-full overflow-hidden mb-2">
+        <div class="h-full rounded-full" style="width:${s.percentage}%;background:${s.color}"></div>
+      </div>
+      <div class="flex justify-between text-[10px] text-textMuted">
+        <span>${s.attended}/${s.total} attended</span>
+        ${s.percentage>=TARGET?`<span class="text-success">Can bunk ${sb} more</span>`:`<span class="text-danger">Need ${cn} more classes</span>`}
+      </div>
+    </div>`;
+
+    // Pie chart
+    if(s.total>0){
+      const absent=s.total-s.attended;
+      const presAngle=(s.attended/s.total)*360;
+      const r=40,cx=50,cy=50;
+      function polarToCart(cx,cy,r,deg){const rad=(deg-90)*Math.PI/180;return{x:cx+r*Math.cos(rad),y:cy+r*Math.sin(rad)}}
+      let pie='';
+      if(s.attended===s.total){
+        pie=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}"/>`;
+      }else if(s.attended===0){
+        pie=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="#ef4444"/>`;
+      }else{
+        const e1=polarToCart(cx,cy,r,presAngle);
+        const large1=presAngle>180?1:0;
+        pie=`<path d="M${cx},${cy} L${cx},${cy-r} A${r},${r} 0 ${large1},1 ${e1.x},${e1.y} Z" fill="${s.color}" class="chart-slice"/>`;
+        const e2=polarToCart(cx,cy,r,360);
+        const large2=(360-presAngle)>180?1:0;
+        pie+=`<path d="M${cx},${cy} L${e1.x},${e1.y} A${r},${r} 0 ${large2},1 ${cx},${cy-r} Z" fill="#ef4444" opacity="0.7" class="chart-slice"/>`;
+      }
+      html+=`<div class="bg-surface rounded-2xl p-3 border border-white/5 flex items-center gap-4 -mt-2">
+        <svg viewBox="0 0 100 100" width="60" height="60">${pie}</svg>
+        <div class="flex gap-3 text-[10px]">
+          <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full" style="background:${s.color}"></div> Present (${s.attended})</div>
+          <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-danger opacity-70"></div> Absent (${absent})</div>
+        </div>
+      </svg></div>`;
+    }
+  });
+
+  html+=`</div>`;
+  container.innerHTML=html;
+}
+
+// ==================== TIMETABLE TAB ====================
+let ttEditDay='Monday';
+function renderTimetable(container){
+  const timetable=getTimetable();
+  const subjects=getSubjects();
+
+  let html=`<div class="px-4 py-4 space-y-4 fade-in">
+    <h2 class="text-sm font-semibold text-textSecondary flex items-center gap-2"><i data-lucide="calendar" style="width:14px;height:14px;color:#6366f1"></i> Weekly Timetable</h2>`;
+
+  // Day tabs
+  html+=`<div class="flex gap-1 overflow-x-auto no-scrollbar pb-1">`;
+  DAYS.forEach((d,i)=>{
+    const isActive=d===ttEditDay;
+    const dayName=getDayName();
+    const isToday=d===dayName;
+    html+=`<button onclick="ttEditDay='${d}';renderCurrentTab()" class="px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${isActive?'bg-accent text-white':'bg-surfaceLight text-textSecondary hover:bg-surfaceLight/80'} ${isToday&&!isActive?'ring-1 ring-accent/50':''}">${DAY_SHORT[i]}${isToday?' •':''}</button>`;
+  });
+  html+=`</div>`;
+
+  const daySlots=timetable.filter(r=>r.day===ttEditDay).sort((a,b)=>a.period-b.period);
+
+  if(subjects.length===0){
+    html+=`<div class="bg-surface rounded-2xl p-6 text-center border border-white/5">
+      <p class="text-sm text-textSecondary">Add subjects first in the Subjects tab.</p>
+    </div>`;
+  } else {
+    // Add slot
+    html+=`<div class="bg-surface rounded-2xl p-3 border border-white/5 space-y-2">
+      <p class="text-xs font-semibold text-textSecondary">Add Period</p>
+      <div class="flex gap-2">
+        <select id="tt-subject" class="flex-1 bg-surfaceLight text-textPrimary text-xs rounded-lg px-3 py-2 border border-white/10 outline-none focus:border-accent">
+          ${subjects.map(s=>`<option value="${s.subject_name}">${s.subject_name}</option>`).join('')}
+        </select>
+        <input id="tt-period" type="number" min="1" max="10" placeholder="P#" class="w-16 bg-surfaceLight text-textPrimary text-xs rounded-lg px-3 py-2 border border-white/10 outline-none focus:border-accent text-center">
+        <button onclick="addTimetableSlot()" class="bg-accent text-white text-xs px-3 py-2 rounded-lg font-medium hover:bg-accentLight transition-colors">Add</button>
+      </div>
+    </div>`;
+
+    if(daySlots.length){
+      html+=`<div class="space-y-2">`;
+      daySlots.forEach(slot=>{
+        const sub=subjects.find(s=>s.subject_name===slot.subject_name);
+        const col=sub?sub.subject_color:'#6366f1';
+        html+=`<div class="bg-surface rounded-xl p-3 border border-white/5 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold" style="background:${col}">P${slot.period}</div>
+            <span class="text-sm font-medium">${slot.subject_name}</span>
+          </div>
+          <button onclick="deleteTimetableSlot('${slot.__backendId}')" class="w-7 h-7 rounded-lg bg-danger/10 flex items-center justify-center hover:bg-danger/20 transition-colors">
+            <i data-lucide="x" style="width:14px;height:14px;color:#ef4444"></i>
+          </button>
+        </div>`;
+      });
+      html+=`</div>`;
+    } else {
+      html+=`<p class="text-xs text-textMuted text-center py-4">No periods set for ${ttEditDay}</p>`;
+    }
+  }
+
+  // Past attendance editing
+  html+=`<div class="mt-4 space-y-2">
+    <h3 class="text-sm font-semibold text-textSecondary flex items-center gap-2"><i data-lucide="edit" style="width:14px;height:14px"></i> Edit Past Attendance</h3>
+    <div class="flex gap-2">
+      <input id="edit-date" type="date" class="flex-1 bg-surfaceLight text-textPrimary text-xs rounded-lg px-3 py-2 border border-white/10 outline-none focus:border-accent">
+      <button onclick="loadPastDate()" class="bg-accent text-white text-xs px-3 py-2 rounded-lg font-medium hover:bg-accentLight">Load</button>
+    </div>
+    <div id="past-attendance-list"></div>
+  </div>`;
+
+  html+=`</div>`;
+  container.innerHTML=html;
+}
+
+async function addTimetableSlot(){
+  const subj=document.getElementById('tt-subject')?.value;
+  const period=parseInt(document.getElementById('tt-period')?.value);
+  if(!subj||!period||period<1) return showToast('Select subject & period number');
+  const existing=getTimetable().find(r=>r.day===ttEditDay && r.period===period);
+  if(existing) return showToast(`Period ${period} already set for ${ttEditDay}`);
+  if(allRecords.length>=999) return showToast('Storage limit reached!');
+  await window.dataSdk.create({type:'timetable',subject_name:subj,subject_color:'',day:ttEditDay,period,date:'',status:'',attended:0,total:0,created_at:new Date().toISOString()});
+  showToast(`Added P${period}: ${subj}`);
+}
+
+async function deleteTimetableSlot(id){
+  const rec=allRecords.find(r=>r.__backendId===id);
+  if(rec){
+    pushUndo('delete',{...rec});
+    await window.dataSdk.delete(rec);
+    showToast('Removed from timetable');
+  }
+}
+
+function loadPastDate(){
+  const dateInput=document.getElementById('edit-date');
+  if(!dateInput||!dateInput.value) return showToast('Pick a date');
+  const date=dateInput.value;
+  const d=new Date(date+'T12:00:00');
+  const dayIdx=d.getDay()-1;
+  if(dayIdx<0||dayIdx>5) return showToast('Sundays have no classes');
+  const day=DAYS[dayIdx];
+  const slots=getTimetable().filter(r=>r.day===day).sort((a,b)=>a.period-b.period);
+  const att=getAttendance().filter(r=>r.date===date);
+  const subjects=getSubjects();
+
+  const listEl=document.getElementById('past-attendance-list');
+  if(!slots.length){listEl.innerHTML=`<p class="text-xs text-textMuted py-2">No timetable for ${day}</p>`;return}
+
+  let h=`<div class="space-y-2 mt-2">`;
+  slots.forEach(slot=>{
+    const existing=att.find(a=>a.subject_name===slot.subject_name && a.period===slot.period);
+    const sub=subjects.find(s=>s.subject_name===slot.subject_name);
+    const col=sub?sub.subject_color:'#6366f1';
+    h+=`<div class="bg-surfaceLight rounded-xl p-2 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded flex items-center justify-center text-white text-[9px] font-bold" style="background:${col}">P${slot.period}</div>
+        <span class="text-xs font-medium">${slot.subject_name}</span>
+      </div>
+      <div class="flex gap-1">
+        <button onclick="markPastAttendance('${slot.subject_name}',${slot.period},'${date}','${day}','present')" class="text-[10px] px-2 py-1 rounded-lg ${existing&&existing.status==='present'?'bg-success text-white':'bg-success/10 text-success'}">P</button>
+        <button onclick="markPastAttendance('${slot.subject_name}',${slot.period},'${date}','${day}','absent')" class="text-[10px] px-2 py-1 rounded-lg ${existing&&existing.status==='absent'?'bg-danger text-white':'bg-danger/10 text-danger'}">A</button>
+        <button onclick="markPastAttendance('${slot.subject_name}',${slot.period},'${date}','${day}','noclass')" class="text-[10px] px-2 py-1 rounded-lg ${existing&&existing.status==='noclass'?'bg-textMuted text-white':'bg-white/5 text-textMuted'}">N</button>
+      </div>
+    </div>`;
+  });
+  h+=`</div>`;
+  listEl.innerHTML=h;
+}
+
+async function markPastAttendance(subj,period,date,day,status){
+  const existing=getAttendance().find(r=>r.date===date && r.subject_name===subj && r.period===period);
+  if(existing){
+    pushUndo('update',{...existing});
+    await window.dataSdk.update({...existing,status});
+  } else {
+    if(allRecords.length>=999) return showToast('Storage limit reached!');
+    await window.dataSdk.create({type:'attendance',subject_name:subj,subject_color:'',day,period,date,status,attended:0,total:0,created_at:new Date().toISOString()});
+    pushUndo('create',{type:'attendance',subject_name:subj,date,period});
+  }
+  showToast('Updated!');
+  setTimeout(loadPastDate,300);
+}
+
+// ==================== SUBJECTS TAB ====================
+let editingSubject=null;
+function renderSubjects(container){
+  const subjects=getSubjects();
+  let html=`<div class="px-4 py-4 space-y-4 fade-in">
+    <h2 class="text-sm font-semibold text-textSecondary flex items-center gap-2"><i data-lucide="book-open" style="width:14px;height:14px;color:#6366f1"></i> Manage Subjects</h2>
+    <div class="bg-surface rounded-2xl p-3 border border-white/5 space-y-2" id="subject-form">
+      <p class="text-xs font-semibold text-textSecondary" id="subj-form-title">Add Subject</p>
+      <input id="subj-name" type="text" placeholder="Subject name" class="w-full bg-surfaceLight text-textPrimary text-xs rounded-lg px-3 py-2 border border-white/10 outline-none focus:border-accent" maxlength="30">
+      <div class="flex gap-2 flex-wrap" id="color-picker">
+        ${SUBJECT_COLORS.map((c,i)=>`<button onclick="pickColor(${i})" class="w-7 h-7 rounded-full border-2 border-transparent hover:scale-110 transition-transform color-btn" data-ci="${i}" style="background:${c}"></button>`).join('')}
+      </div>
+      <input type="hidden" id="subj-color" value="${SUBJECT_COLORS[0]}">
+      <div class="flex gap-2">
+        <button onclick="saveSubject()" class="flex-1 bg-accent text-white text-xs py-2 rounded-lg font-medium hover:bg-accentLight transition-colors" id="subj-save-btn">Add Subject</button>
+        ${editingSubject?`<button onclick="cancelEditSubject()" class="bg-surfaceLight text-textSecondary text-xs px-3 py-2 rounded-lg hover:bg-white/10">Cancel</button>`:''}
+      </div>
+    </div>`;
+
+  if(subjects.length){
+    html+=`<div class="space-y-2">`;
+    subjects.forEach(s=>{
+      const st=getSubjectStats(s.subject_name);
+      html+=`<div class="bg-surface rounded-xl p-3 border border-white/5 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full" style="background:${s.subject_color}"></div>
+          <div>
+            <p class="text-sm font-medium">${s.subject_name}</p>
+            <p class="text-[10px] text-textMuted">${st.attended}/${st.total} · ${st.percentage}%</p>
+          </div>
+        </div>
+        <div class="flex gap-1">
+          <button onclick="editSubject('${s.__backendId}')" class="w-7 h-7 rounded-lg bg-accent/10 flex items-center justify-center hover:bg-accent/20">
+            <i data-lucide="edit-2" style="width:12px;height:12px;color:#6366f1"></i>
+          </button>
+          <button onclick="startDeleteSubject('${s.__backendId}')" class="w-7 h-7 rounded-lg bg-danger/10 flex items-center justify-center hover:bg-danger/20" id="del-${s.__backendId}">
+            <i data-lucide="trash-2" style="width:12px;height:12px;color:#ef4444"></i>
+          </button>
+        </div>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+
+  html+=`</div>`;
+  container.innerHTML=html;
+
+  // Highlight default color
+  const colorBtns=container.querySelectorAll('.color-btn');
+  if(colorBtns.length) colorBtns[0].style.borderColor='#fff';
+}
+
+function pickColor(idx){
+  document.getElementById('subj-color').value=SUBJECT_COLORS[idx];
+  document.querySelectorAll('.color-btn').forEach(b=>{
+    b.style.borderColor=parseInt(b.dataset.ci)===idx?'#fff':'transparent';
+  });
+}
+
+async function saveSubject(){
+  const nameEl=document.getElementById('subj-name');
+  const name=nameEl?.value.trim();
+  const color=document.getElementById('subj-color')?.value||SUBJECT_COLORS[0];
+  if(!name) return showToast('Enter a subject name');
+
+  if(editingSubject){
+    const rec=allRecords.find(r=>r.__backendId===editingSubject);
+    if(rec){
+      const oldName=rec.subject_name;
+      pushUndo('update',{...rec});
+      await window.dataSdk.update({...rec,subject_name:name,subject_color:color});
+      // Update timetable & attendance references
+      const related=[...getTimetable(),...getAttendance()].filter(r=>r.subject_name===oldName);
+      for(const r of related){
+        await window.dataSdk.update({...r,subject_name:name});
+      }
+    }
+    editingSubject=null;
+    showToast('Subject updated!');
+  } else {
+    if(getSubjects().find(s=>s.subject_name.toLowerCase()===name.toLowerCase())) return showToast('Subject already exists');
+    if(allRecords.length>=999) return showToast('Storage limit reached!');
+    await window.dataSdk.create({type:'subject',subject_name:name,subject_color:color,day:'',period:0,date:'',status:'',attended:0,total:0,created_at:new Date().toISOString()});
+    pushUndo('create',{type:'subject',subject_name:name});
+    showToast('Subject added! 📚');
+  }
+}
+
+function editSubject(id){
+  const rec=allRecords.find(r=>r.__backendId===id);
+  if(!rec) return;
+  editingSubject=id;
+  renderCurrentTab();
+  setTimeout(()=>{
+    document.getElementById('subj-name').value=rec.subject_name;
+    document.getElementById('subj-color').value=rec.subject_color;
+    document.getElementById('subj-form-title').textContent='Edit Subject';
+    document.getElementById('subj-save-btn').textContent='Save Changes';
+    const ci=SUBJECT_COLORS.indexOf(rec.subject_color);
+    if(ci>=0) pickColor(ci);
+  },50);
+}
+
+function cancelEditSubject(){
+  editingSubject=null;
+  renderCurrentTab();
+}
+
+async function startDeleteSubject(id){
+  const btn=document.getElementById('del-'+id);
+  if(!btn) return;
+  if(btn.dataset.confirm==='true'){
+    const rec=allRecords.find(r=>r.__backendId===id);
+    if(rec){
+      pushUndo('delete',{...rec});
+      await window.dataSdk.delete(rec);
+      // Also clean timetable entries for this subject
+      const ttEntries=getTimetable().filter(r=>r.subject_name===rec.subject_name);
+      for(const t of ttEntries) await window.dataSdk.delete(t);
+      showToast('Subject deleted');
+    }
+  } else {
+    btn.dataset.confirm='true';
+    btn.innerHTML='<span class="text-[9px] text-danger font-bold">Sure?</span>';
+    btn.classList.add('w-12');
+    setTimeout(()=>{
+      btn.dataset.confirm='';
+      btn.innerHTML='<i data-lucide="trash-2" style="width:12px;height:12px;color:#ef4444"></i>';
+      btn.classList.remove('w-12');
+      lucide.createIcons();
+    },3000);
+  }
+}
+
+// ==================== DATE HEADER ====================
+function updateDateHeader(){
+  const d=new Date();
+  const opts={weekday:'long',month:'long',day:'numeric'};
+  document.getElementById('header-date').textContent=d.toLocaleDateString('en-US',opts);
+}
+
+// ==================== SDK INIT ====================
+const defaultConfig={
+  app_title:'📚 Attendance Tracker',
+  target_text:'75% Required',
+  background_color:'#0f0f1a',
+  surface_color:'#1a1a2e',
+  text_color:'#e2e8f0',
+  accent_color:'#6366f1',
+  secondary_color:'#252542',
+  font_family:'Outfit',
+  font_size:14
+};
+
+const dataHandler={
+  onDataChanged(data){
+    allRecords=data;
+    renderCurrentTab();
+  }
+};
+
+window.elementSdk.init({
+  defaultConfig,
+  onConfigChange:async(config)=>{
+    const title=config.app_title||defaultConfig.app_title;
+    const bg=config.background_color||defaultConfig.background_color;
+    const surf=config.surface_color||defaultConfig.surface_color;
+    const txt=config.text_color||defaultConfig.text_color;
+    const acc=config.accent_color||defaultConfig.accent_color;
+    const sec=config.secondary_color||defaultConfig.secondary_color;
+    const font=config.font_family||defaultConfig.font_family;
+    const size=config.font_size||defaultConfig.font_size;
+
+    document.getElementById('header-title').textContent=title;
+    document.body.style.backgroundColor=bg;
+    document.body.style.color=txt;
+    document.body.style.fontFamily=`${font}, Outfit, sans-serif`;
+    document.body.style.fontSize=`${size}px`;
+    document.documentElement.style.setProperty('--bg',bg);
+    document.documentElement.style.setProperty('--surface',surf);
+    document.documentElement.style.setProperty('--text',txt);
+    document.documentElement.style.setProperty('--accent',acc);
+    document.documentElement.style.setProperty('--secondary',sec);
+  },
+  mapToCapabilities:(config)=>({
+    recolorables:[
+      {get:()=>config.background_color||defaultConfig.background_color,set:v=>{config.background_color=v;window.elementSdk.setConfig({background_color:v})}},
+      {get:()=>config.surface_color||defaultConfig.surface_color,set:v=>{config.surface_color=v;window.elementSdk.setConfig({surface_color:v})}},
+      {get:()=>config.text_color||defaultConfig.text_color,set:v=>{config.text_color=v;window.elementSdk.setConfig({text_color:v})}},
+      {get:()=>config.accent_color||defaultConfig.accent_color,set:v=>{config.accent_color=v;window.elementSdk.setConfig({accent_color:v})}},
+      {get:()=>config.secondary_color||defaultConfig.secondary_color,set:v=>{config.secondary_color=v;window.elementSdk.setConfig({secondary_color:v})}}
+    ],
+    borderables:[],
+    fontEditable:{get:()=>config.font_family||defaultConfig.font_family,set:v=>{config.font_family=v;window.elementSdk.setConfig({font_family:v})}},
+    fontSizeable:{get:()=>config.font_size||defaultConfig.font_size,set:v=>{config.font_size=v;window.elementSdk.setConfig({font_size:v})}}
+  }),
+  mapToEditPanelValues:(config)=>new Map([
+    ['app_title',config.app_title||defaultConfig.app_title],
+    ['target_text',config.target_text||defaultConfig.target_text]
+  ])
+});
+
+(async()=>{
+  const res=await window.dataSdk.init(dataHandler);
+  if(!res.isOk) console.error('Data SDK init failed');
+  updateDateHeader();
+  switchTab('home');
+  lucide.createIcons();
+})();
+</script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9e034e4b63b41967',t:'MTc3NDE2MjY4NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
